@@ -1,0 +1,100 @@
+---
+title: "Model for classifying workouts"
+author: "Roman Vodonenko"
+date: "10/23/2014"
+output: html_document
+---
+
+1. Getting data from csv file:
+```{r, eval=FALSE}
+train_data <- read.csv("pml-training.csv")
+```
+
+
+2. Eliminating those values that have variance close to zero:
+```{r, eval=FALSE}
+nzv <- nearZeroVar(train_data, saveMetrics=TRUE)
+train_data <- train_data[, !(nzv$nzv)]
+```
+
+
+3. Some variables have a large number of NA values. We need to eliminate them:
+```{r, eval=FALSE}
+nna <- data.frame()
+for(i in 1:ncol(train_data)){
+    nna <- rbind(nna, data.frame(variable=colnames(train_data)[i], 
+                                 na_percent=sum(is.na(train_data[,i]))/nrow(train_data)
+                                 )
+                 )
+}
+
+na_pecent_freq <- table(nna$na_percent)
+train_data <- train_data[,nna$na_percent==0]
+```
+
+
+5. Eliminating the redundant time stamp variable:
+```{r, eval=FALSE}
+train_data  <- subset(train_data, select = -(cvtd_timestamp))
+```
+
+6. Converting factor variables to binomial:
+```{r, eval=FALSE}
+user_dummy <- dummyVars(classe~user_name, data=train_data)
+train_data <- cbind(predict(user_dummy, train_data),subset(train_data, select = -c(X,user_name)) )
+```
+
+7. Preprocessing with PCA in order to reduce number of variables
+```{r, eval=FALSE}
+pca_model <- preProcess(subset(train_data, select=-classe), method="pca", thresh=0.95)
+predictor <- predict(pca_model,subset(train_data, select=-classe) )
+pca_data <- cbind(classe=train_data$classe, predictor)
+```
+
+8. Building a 3 models using Decision Tree, Naive Bayes and kNN methods:  
+```{r, eval=FALSE}
+set.seed(123)
+sample_index <- createDataPartition(y=pca_data$classe, list=FALSE, p=0.6)
+
+train_set <- pca_data[sample_index,]
+test_set <- pca_data[-sample_index,]
+
+ctree_mod <- train(classe~., data=train_set, method='ctree')
+nb_mod <- train(classe~., data=train_set, method = "nb")
+fit_knn<-train.kknn(formula=classe~., data=train_set)
+```
+
+
+9. Applying cross valdiation to test each of the selected models:
+```{r, eval=FALSE}
+x_validation <- data.frame( actual = test_set$classe,
+                            ctree_prediction=predict(ctree_mod, test_set), 
+                            nb_prediction=predict(nb_mod, test_set), 
+                            knn_prediction =predict(fit_knn, test_set)
+                            
+                            )
+```
+
+10. Calculating accuracy for each of the selected models:
+```{r, eval=FALSE}
+ctree_accuracy <- sum(x_validation$ctree_prediction==x_validation$actual)/nrow(x_validation)
+nb_accuracy <- sum(x_validation$nb_prediction==x_validation$actual)/nrow(x_validation)
+knn_accuracy <- sum(x_validation$knn_prediction==x_validation$actual)/nrow(x_validation)
+```
+
+
+11. Since kNN was the best model in terms of acccuracy we select this method to build the final model:
+```{r, eval=FALSE}
+fit_knn_all_data <- train.kknn(formula=classe~., data=pca_data)
+```
+
+12. Applying final model to the test data:
+```{r, eval=FALSE}
+test_data <- read.csv("pml-testing.csv")
+test_data <- test_data[, !(nzv$nzv)]
+test_data <- test_data[,nna$na_percent==0]
+test_data  <- subset(test_data, select = -(cvtd_timestamp))
+test_user_dummy <- dummyVars(X~user_name, data=test_data)
+test_data <- cbind(predict(test_user_dummy, test_data),subset(test_data, select = -c(X,user_name, problem_id)) )
+predictor_test <- predict(pca_model,test_data)
+```
